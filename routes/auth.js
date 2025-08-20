@@ -365,6 +365,102 @@ router.post("/login", async (req, res) => {
   }
 });
 
+// Request OTP for password reset
+router.post("/request-reset-password", async (req, res) => {
+  const { email } = req.body;
+  const user = await User.findOne({ email });
+
+  if (!user) return res.status(400).json({ message: "User not found" });
+
+  // Generate OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otpExpires = new Date(Date.now() + 2 * 60 * 1000); // 2 mins
+
+  const sendEmail = require("../utils/sendEmail");
+  try {
+    await sendEmail({
+      to: email,
+      subject: "NoteWise Password Reset OTP",
+      html: `<p>Your OTP for resetting password is: <strong>${otp}</strong></p>`,
+    });
+
+    user.resetOtp = otp;
+    user.resetOtpExpires = otpExpires;
+    await user.save();
+
+    res.json({ message: "OTP sent for password reset!" });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to send OTP" });
+  }
+});
+
+// Resend OTP for password reset
+router.post("/resend-reset-otp", async (req, res) => {
+  const { email } = req.body;
+  const user = await User.findOne({ email });
+
+  if (!user) return res.status(400).json({ message: "User not found" });
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otpExpires = new Date(Date.now() + 2 * 60 * 1000);
+
+  const sendEmail = require("../utils/sendEmail");
+  try {
+    await sendEmail({
+      to: email,
+      subject: "NoteWise Password Reset OTP Resend",
+      html: `<p>Your new OTP for resetting password is: <strong>${otp}</strong></p>`,
+    });
+
+    user.resetOtp = otp;
+    user.resetOtpExpires = otpExpires;
+    await user.save();
+
+    res.json({ message: "New OTP sent for password reset!" });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to resend OTP" });
+  }
+});
+
+// Verify OTP for password reset
+router.post("/verify-reset-otp", async (req, res) => {
+  const { email, otp } = req.body;
+  const user = await User.findOne({ email });
+
+  if (!user) return res.status(400).json({ message: "User not found" });
+
+  if (user.resetOtp !== otp) {
+    return res.status(400).json({ message: "Invalid OTP" });
+  }
+
+  if (user.resetOtpExpires < Date.now()) {
+    return res.status(400).json({ message: "OTP expired" });
+  }
+
+  // Clear OTP after verification
+  user.resetOtp = null;
+  user.resetOtpExpires = null;
+  await user.save();
+
+  res.json({ message: "OTP verified for password reset" });
+});
+
+// Reset password after OTP verification
+router.post("/reset-password", async (req, res) => {
+  const { email, newPassword } = req.body;
+  const bcrypt = require("bcryptjs");
+  const user = await User.findOne({ email });
+
+  if (!user) return res.status(400).json({ message: "User not found" });
+
+  // Hash and save new password
+  const salt = await bcrypt.genSalt(10);
+  user.password = await bcrypt.hash(newPassword, salt);
+  await user.save();
+
+  res.json({ message: "Password reset successful" });
+});
+
 router.post("/upload", authenticate, async (req, res) => {
   try {
     if (req.user.isActive === false) {
@@ -559,13 +655,13 @@ router.get("/documents", async (req, res) => {
             avatar: doc.uploadedBy.avatar
               ? doc.uploadedBy.avatar.startsWith("http")
                 ? doc.uploadedBy.avatar
-                : `https://notewise-dev-backend-99b79fec4f6a.herokuapp.com${doc.uploadedBy.avatar}`
-              : "https://notewise-dev-backend-99b79fec4f6a.herokuapp.com/images/avatar.png", // ✅ fallback avatar
+                : `http://localhost:5001${doc.uploadedBy.avatar}`
+              : "http://localhost:5001/images/avatar.png", // ✅ fallback avatar
           }
         : {
             _id: "unknown",
             username: "Unknown",
-            avatar: "https://notewise-dev-backend-99b79fec4f6a.herokuapp.com/images/avatar.png", // ✅ for missing uploader
+            avatar: "http://localhost:5001/images/avatar.png", // ✅ for missing uploader
           },
     }));
 
@@ -694,7 +790,6 @@ router.put("/update-profile/:id", async (req, res) => {
       message: "Profile updated successfully",
       user: {
         _id: updatedUser._id,
-        email: updatedUser.email,
         username: updatedUser.username,
         idCard: updatedUser.idCard,
         role: updatedUser.role,
@@ -740,13 +835,13 @@ router.get("/search", async (req, res) => {
             avatar: doc.uploadedBy.avatar
               ? doc.uploadedBy.avatar.startsWith("http")
                 ? doc.uploadedBy.avatar
-                : `https://notewise-dev-backend-99b79fec4f6a.herokuapp.com${doc.uploadedBy.avatar}`
-              : "https://notewise-dev-backend-99b79fec4f6a.herokuapp.com/images/avatar.png", // ✅ fallback
+                : `http://localhost:5001${doc.uploadedBy.avatar}`
+              : "http://localhost:5001/images/avatar.png", // ✅ fallback
           }
         : {
             // _id: "unknown",
             username: "Unknown",
-            avatar: "https://notewise-dev-backend-99b79fec4f6a.herokuapp.com/images/avatar.png", // fallback
+            avatar: "http://localhost:5001/images/avatar.png", // fallback
           },
     }));
 
@@ -813,7 +908,7 @@ router.get("/document/:id", authenticate, async (req, res) => {
             username: document.uploadedBy.username,
             avatar: document.uploadedBy.avatar?.startsWith("http")
               ? document.uploadedBy.avatar
-              : `https://notewise-dev-backend-99b79fec4f6a.herokuapp.com${document.uploadedBy.avatar}`,
+              : `http://localhost:5001${document.uploadedBy.avatar}`,
           }
         : null,
     };
@@ -1023,20 +1118,20 @@ router.get("/my-documents", authenticate, async (req, res) => {
         dislikes: doc.dislikes || 0,
         thumbnailUrl: doc.thumbnail?.startsWith("http")
           ? doc.thumbnail
-          : `https://notewise-dev-backend-99b79fec4f6a.herokuapp.com/${doc.thumbnail}`,
+          : `http://localhost:5001/${doc.thumbnail}`,
         uploader: doc.uploadedBy
           ? {
               username: doc.uploadedBy.username,
               avatar: doc.uploadedBy.avatar
                 ? doc.uploadedBy.avatar.startsWith("http")
                   ? doc.uploadedBy.avatar
-                  : `https://notewise-dev-backend-99b79fec4f6a.herokuapp.com${doc.uploadedBy.avatar}`
-                : "https://notewise-dev-backend-99b79fec4f6a.herokuapp.com/images/avatar.png", // ✅ fallback avatar
+                  : `http://localhost:5001${doc.uploadedBy.avatar}`
+                : "http://localhost:5001/images/avatar.png", // ✅ fallback avatar
               _id: doc.uploadedBy._id,
             }
           : {
               username: "Unknown",
-              avatar: "https://notewise-dev-backend-99b79fec4f6a.herokuapp.com/images/avatar.png", // ✅ for missing uploader
+              avatar: "http://localhost:5001/images/avatar.png", // ✅ for missing uploader
             },
       });
     });
@@ -1211,12 +1306,12 @@ router.get("/documents/user/:userId", async (req, res) => {
             avatar: doc.uploadedBy.avatar
               ? doc.uploadedBy.avatar.startsWith("http")
                 ? doc.uploadedBy.avatar
-                : `https://notewise-dev-backend-99b79fec4f6a.herokuapp.com${doc.uploadedBy.avatar}`
-              : "https://notewise-dev-backend-99b79fec4f6a.herokuapp.com/images/avatar.png", // ✅ fallback avatar
+                : `http://localhost:5001${doc.uploadedBy.avatar}`
+              : "http://localhost:5001/images/avatar.png", // ✅ fallback avatar
           }
         : {
             username: "Unknown",
-            avatar: "https://notewise-dev-backend-99b79fec4f6a.herokuapp.com/images/avatar.png", // ✅ for missing uploader
+            avatar: "http://localhost:5001/images/avatar.png", // ✅ for missing uploader
           },
     }));
 
@@ -1298,7 +1393,7 @@ router.get("/documents/recently-viewed", authenticate, async (req, res) => {
             username: doc.uploadedBy.username,
             avatar: doc.uploadedBy.avatar?.startsWith("http")
               ? doc.uploadedBy.avatar
-              : `https://notewise-dev-backend-99b79fec4f6a.herokuapp.com${doc.uploadedBy.avatar}`,
+              : `http://localhost:5001${doc.uploadedBy.avatar}`,
           }
         : null,
     }));
